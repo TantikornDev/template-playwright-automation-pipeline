@@ -1,0 +1,111 @@
+# ─────────────────────────────────────────────────────────────
+# azure-pipelines.yml (ตัวอย่าง — copy ไปใช้ใน project ของตัวเอง)
+#
+# ใช้ templates จาก: TantikornDev/template-playwright-automation-pipeline
+#
+# Setup ก่อนใช้:
+#   1. สร้าง Service Connection ชื่อ "github-playwright-templates"
+#      (Project Settings → Service connections → GitHub)
+#   2. ใน Variable Group ตั้งชื่อ secret variable ให้ตรงกับ WEBHOOK_URL_VAR
+# ─────────────────────────────────────────────────────────────
+
+trigger:
+  branches:
+    include:
+      - main
+      - release/*
+      - feature/*
+
+pr:
+  branches:
+    include:
+      - main
+  paths:
+    include:
+      - tests/**
+      - azure-pipelines.yml
+
+schedules:
+  - cron: "0 3 * * 1-5"
+    displayName: "Daily 10:00 ICT (Mon-Fri)"
+    branches:
+      include:
+        - main
+    always: true
+
+# ── Reference GitHub template repo ──────────────────────────
+resources:
+  repositories:
+    - repository: templates
+      type: github
+      name: TantikornDev/template-playwright-automation-pipeline
+      endpoint: github-playwright-templates   # ← ชื่อ Service Connection
+      ref: refs/tags/v1.0.0                   # ← pin version ด้วย git tag
+
+# ── Pipeline parameters ──────────────────────────────────────
+parameters:
+  - name: TEST_TYPE
+    displayName: "Test Type"
+    type: string
+    default: "web"
+    values:
+      - api
+      - web
+  - name: TEST_ENV
+    displayName: "Test Environment"
+    type: string
+    default: "DEV"
+    values:
+      - DEV
+      - SIT
+      - UAT
+  - name: TEST_PATH
+    displayName: "Test Path (folder or file, relative to tests-api/ or tests-web/)"
+    type: string
+    default: " "
+  - name: TEST_TAG
+    displayName: "Test Tag (e.g. @smoke, @regression)"
+    type: string
+    default: " "
+  - name: EXTRA_ENV
+    displayName: "Extra ENV overrides (e.g. PARALLEL=true DEFAULT_CONNECTION_ID=FW)"
+    type: string
+    default: " "
+
+variables:
+  - group: qa-automation-variables   # ← Variable Group ของ project นี้
+  - name: TEST_TYPE
+    value: ${{ parameters.TEST_TYPE }}
+  - name: TEST_ENV
+    value: ${{ parameters.TEST_ENV }}
+  - name: TEST_PATH
+    value: ${{ parameters.TEST_PATH }}
+
+# ── Stages (reference templates from GitHub) ─────────────────
+stages:
+  # Stage 1: Dry Run - Validate files (non-main branches only)
+  - template: stages/dry-run.yml@templates
+    parameters:
+      TEST_TYPE: ${{ parameters.TEST_TYPE }}
+      # WEB_DIR: "tests/web-testing"   # default — ไม่ต้องระบุถ้าตรงกับ default
+      # API_DIR: "tests/api-testing"   # default — ไม่ต้องระบุถ้าตรงกับ default
+
+  # Stage 2: Build Dependencies (main branch only)
+  - template: stages/build-dependencies.yml@templates
+    parameters:
+      TEST_TYPE: ${{ parameters.TEST_TYPE }}
+
+  # Stage 3: Run Tests
+  - template: stages/run-tests.yml@templates
+    parameters:
+      TEST_TYPE: ${{ parameters.TEST_TYPE }}
+      TEST_ENV: ${{ parameters.TEST_ENV }}
+      TEST_PATH: ${{ parameters.TEST_PATH }}
+      TEST_TAG: ${{ parameters.TEST_TAG }}
+      EXTRA_ENV: ${{ parameters.EXTRA_ENV }}
+
+  # Stage 4: Notify via Teams
+  - template: stages/notify.yml@templates
+    parameters:
+      TEST_TYPE: ${{ parameters.TEST_TYPE }}
+      WEBHOOK_URL_VAR: "TEAMS_WEBHOOK_URL_WMSH"   # ← ชื่อ secret ใน Variable Group

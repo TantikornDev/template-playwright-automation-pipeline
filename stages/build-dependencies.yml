@@ -1,0 +1,77 @@
+# ─────────────────────────────────────────────────────────────
+# Stage: Build Dependencies - Install & cache as artifacts
+# Runs on: main branch only
+#
+# Parameters:
+#   TEST_TYPE  : 'web' | 'api'
+#   WEB_DIR    : relative path to web tests   (default: tests/web-testing)
+#   API_DIR    : relative path to api tests   (default: tests/api-testing)
+# ─────────────────────────────────────────────────────────────
+parameters:
+  - name: TEST_TYPE
+    type: string
+
+  - name: WEB_DIR
+    type: string
+    default: "tests/web-testing"
+
+  - name: API_DIR
+    type: string
+    default: "tests/api-testing"
+
+stages:
+  - stage: Build_Dependencies
+    displayName: "Build Dependencies"
+    condition: eq(variables['Build.SourceBranch'], 'refs/heads/main')
+    pool:
+      vmImage: "ubuntu-latest"
+    jobs:
+      - job: Install_Deps
+        displayName: "Install node_modules & browsers"
+        variables:
+          ${{ if eq(parameters.TEST_TYPE, 'web') }}:
+            workDir: ${{ parameters.WEB_DIR }}
+          ${{ else }}:
+            workDir: ${{ parameters.API_DIR }}
+          isWeb: ${{ eq(parameters.TEST_TYPE, 'web') }}
+        steps:
+          - task: Cache@2
+            displayName: "Cache npm"
+            inputs:
+              key: 'npm | "$(Agent.OS)" | $(workDir)/package-lock.json'
+              restoreKeys: 'npm | "$(Agent.OS)"'
+              path: "$(Pipeline.Workspace)/.npm"
+
+          - script: |
+              cd $(workDir)
+              npm config set cache $(Pipeline.Workspace)/.npm
+              npm ci --prefer-offline
+            displayName: "Install dependencies"
+            retryCountOnTaskFailure: 3
+
+          - script: |
+              cd $(workDir)
+              npx playwright install chromium
+              tar -czf $(Build.ArtifactStagingDirectory)/playwright-browsers.tar.gz -C ~/.cache ms-playwright/
+            displayName: "Download Playwright browsers"
+            condition: eq(variables['isWeb'], 'True')
+
+          - script: |
+              cd $(workDir)
+              tar -czf $(Build.ArtifactStagingDirectory)/node_modules.tar.gz node_modules/
+            displayName: "Compress node_modules"
+
+          - task: PublishPipelineArtifact@1
+            displayName: "Publish node_modules"
+            inputs:
+              targetPath: "$(Build.ArtifactStagingDirectory)/node_modules.tar.gz"
+              artifact: "node_modules-compressed"
+              publishLocation: "pipeline"
+
+          - task: PublishPipelineArtifact@1
+            displayName: "Publish Playwright browsers"
+            condition: eq(variables['isWeb'], 'True')
+            inputs:
+              targetPath: "$(Build.ArtifactStagingDirectory)/playwright-browsers.tar.gz"
+              artifact: "playwright-browsers"
+              publishLocation: "pipeline"

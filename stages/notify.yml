@@ -1,0 +1,110 @@
+# ─────────────────────────────────────────────────────────────
+# Stage: Notify - Send test results to Microsoft Teams
+# Depends on: Run_Tests (always runs regardless of result)
+#
+# Parameters:
+#   TEST_TYPE        : 'web' | 'api'
+#   WEBHOOK_URL_VAR  : name of the Variable Group secret that holds
+#                      the Teams webhook URL (default: TEAMS_WEBHOOK_URL)
+#
+# Required Variable Group secret:
+#   $(TEAMS_WEBHOOK_URL)  ← or whatever WEBHOOK_URL_VAR is set to
+# ─────────────────────────────────────────────────────────────
+parameters:
+  - name: TEST_TYPE
+    type: string
+
+  - name: WEBHOOK_URL_VAR
+    type: string
+    default: "TEAMS_WEBHOOK_URL"
+
+stages:
+  - stage: Notify
+    displayName: "Send Notification"
+    dependsOn: Run_Tests
+    condition: always()
+    pool:
+      vmImage: "ubuntu-latest"
+    jobs:
+      - job: Teams_Notification
+        displayName: "Send Teams Notification"
+        variables:
+          testResult: $[ stageDependencies.Run_Tests.Run_Tests.result ]
+          envName: $[ stageDependencies.Run_Tests.Run_Tests.outputs['runTests.ENV'] ]
+          testType: $[ stageDependencies.Run_Tests.Run_Tests.outputs['runTests.TEST_TYPE'] ]
+          testPath: $[ stageDependencies.Run_Tests.Run_Tests.outputs['runTests.TEST_PATH'] ]
+          passed: $[ stageDependencies.Run_Tests.Run_Tests.outputs['runTests.PASSED'] ]
+          failed: $[ stageDependencies.Run_Tests.Run_Tests.outputs['runTests.FAILED'] ]
+          skipped: $[ stageDependencies.Run_Tests.Run_Tests.outputs['runTests.SKIPPED'] ]
+          flaky: $[ stageDependencies.Run_Tests.Run_Tests.outputs['runTests.FLAKY'] ]
+          duration: $[ stageDependencies.Run_Tests.Run_Tests.outputs['runTests.DURATION'] ]
+        steps:
+          - script: |
+              # Determine status color and icon
+              STATUS="$(testResult)"
+              FAILED_COUNT="$(failed)"
+              TYPE_UPPER=$(echo "$(testType)" | tr '[:lower:]' '[:upper:]')
+
+              if [ "$FAILED_COUNT" != "?" ] && [ "$FAILED_COUNT" != "0" ] && [ -n "$FAILED_COUNT" ]; then
+                COLOR="dc3545"; ICON="❌"; STATUS="Failed ($FAILED_COUNT)"
+              elif [ "$STATUS" = "Succeeded" ]; then
+                COLOR="28a745"; ICON="✅"
+              elif [ "$STATUS" = "Failed" ]; then
+                COLOR="dc3545"; ICON="❌"
+              else
+                COLOR="ffc107"; ICON="⚠️"
+              fi
+
+              # Build JSON payload
+              PIPELINE_URL="$(System.TeamFoundationCollectionUri)$(System.TeamProject)/_build/results?buildId=$(Build.BuildId)"
+              REPORT_URL="${PIPELINE_URL}&view=ms.vss-test-web.build-test-results-tab"
+
+              PAYLOAD=$(cat <<EOF
+              {
+                "@type": "MessageCard",
+                "@context": "https://schema.org/extensions",
+                "summary": "QA Test Results - $TYPE_UPPER",
+                "themeColor": "$COLOR",
+                "title": "$ICON $TYPE_UPPER Tests - $STATUS",
+                "sections": [{
+                  "activityTitle": "Test Execution Summary",
+                  "activitySubtitle": "$(Build.DefinitionName)",
+                  "facts": [
+                    {"name": "🧪 Test Type", "value": "$TYPE_UPPER"},
+                    {"name": "📂 Test Path", "value": "$(testPath)"},
+                    {"name": "✅ Passed",    "value": "$(passed)"},
+                    {"name": "❌ Failed",    "value": "$(failed)"},
+                    {"name": "⏭️ Skipped",   "value": "$(skipped)"},
+                    {"name": "🔄 Flaky",     "value": "$(flaky)"},
+                    {"name": "⏱️ Duration",  "value": "$(duration)"},
+                    {"name": "🌿 Branch",    "value": "$(Build.SourceBranchName)"},
+                    {"name": "👤 Triggered", "value": "$(Build.RequestedFor)"},
+                    {"name": "🔢 Build",     "value": "$(Build.BuildNumber)"},
+                    {"name": "🌍 Env",       "value": "$(envName)"}
+                  ]
+                }],
+                "potentialAction": [
+                  {
+                    "@type": "OpenUri",
+                    "name": "📋 View Pipeline",
+                    "targets": [{"os": "default", "uri": "$PIPELINE_URL"}]
+                  },
+                  {
+                    "@type": "OpenUri",
+                    "name": "📊 View Test Report",
+                    "targets": [{"os": "default", "uri": "$REPORT_URL"}]
+                  }
+                ]
+              }
+              EOF
+              )
+
+              # Send notification
+              curl -sf -H "Content-Type: application/json" \
+                --retry 3 --retry-delay 2 --max-time 30 \
+                -d "$PAYLOAD" "$WEBHOOK_URL" \
+                && echo "Notification sent" \
+                || echo "##[warning]Failed to send Teams notification"
+            displayName: "Send Teams Notification"
+            env:
+              WEBHOOK_URL: $(${{ parameters.WEBHOOK_URL_VAR }})

@@ -1,0 +1,73 @@
+# ─────────────────────────────────────────────────────────────
+# Stage: Dry Run - Validate project files before merge
+# Runs on: non-main branches only
+#
+# Parameters:
+#   TEST_TYPE  : 'web' | 'api'
+#   WEB_DIR    : relative path to web tests   (default: tests/web-testing)
+#   API_DIR    : relative path to api tests   (default: tests/api-testing)
+# ─────────────────────────────────────────────────────────────
+parameters:
+  - name: TEST_TYPE
+    type: string
+
+  - name: WEB_DIR
+    type: string
+    default: "tests/web-testing"
+
+  - name: API_DIR
+    type: string
+    default: "tests/api-testing"
+
+stages:
+  - stage: Dry_Run
+    displayName: "Dry Run - Validate Files"
+    condition: ne(variables['Build.SourceBranch'], 'refs/heads/main')
+    pool:
+      vmImage: "ubuntu-latest"
+    jobs:
+      - job: Validate
+        displayName: "Validate project files"
+        variables:
+          ${{ if eq(parameters.TEST_TYPE, 'web') }}:
+            workDir: ${{ parameters.WEB_DIR }}
+          ${{ else }}:
+            workDir: ${{ parameters.API_DIR }}
+        steps:
+          - script: |
+              echo "── Dry Run: ${{ parameters.TEST_TYPE }} ──"
+              echo "Branch:   $(Build.SourceBranch)"
+              echo "Work Dir: $(workDir)"
+            displayName: "Print info"
+
+          - script: |
+              cd $(workDir)
+              MISSING=0
+              for FILE in package.json package-lock.json playwright.config.ts; do
+                if [ ! -f "$FILE" ]; then
+                  echo "##vso[task.logissue type=error]$FILE not found"
+                  MISSING=1
+                fi
+              done
+              [ $MISSING -eq 1 ] && exit 1
+              echo "All required files exist"
+            displayName: "Check required files"
+
+          - script: |
+              cd $(workDir) && npm ci --prefer-offline
+            displayName: "Install dependencies"
+            retryCountOnTaskFailure: 2
+
+          - script: |
+              cd $(workDir)
+              npx tsc --noEmit --project tsconfig.json 2>/dev/null || npx tsc --noEmit
+            displayName: "TypeScript compile check"
+            continueOnError: true
+
+          - script: |
+              cd $(workDir)
+              npx playwright test --list 2>/dev/null \
+                && echo "Test files parsed successfully" \
+                || echo "##vso[task.logissue type=warning]Could not list tests"
+            displayName: "Validate test files (list only)"
+            continueOnError: true

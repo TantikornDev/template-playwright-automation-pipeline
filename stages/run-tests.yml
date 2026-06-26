@@ -1,0 +1,227 @@
+# ─────────────────────────────────────────────────────────────
+# Stage: Run Tests - Execute Playwright tests & publish results
+# Depends on: Build_Dependencies
+#
+# Parameters:
+#   TEST_TYPE  : 'web' | 'api'
+#   TEST_ENV   : environment name (e.g. DEV, SIT, UAT)
+#   TEST_PATH  : specific test path/file (optional, default: " ")
+#   TEST_TAG   : grep tag (e.g. @smoke, optional, default: " ")
+#   EXTRA_ENV  : extra env overrides (e.g. PARALLEL=true, optional)
+#   WEB_DIR    : relative path to web tests   (default: tests/web-testing)
+#   API_DIR    : relative path to api tests   (default: tests/api-testing)
+# ─────────────────────────────────────────────────────────────
+parameters:
+  - name: TEST_TYPE
+    type: string
+  - name: TEST_ENV
+    type: string
+  - name: TEST_PATH
+    type: string
+    default: " "
+  - name: TEST_TAG
+    type: string
+    default: " "
+  - name: EXTRA_ENV
+    type: string
+    default: " "
+
+  - name: WEB_DIR
+    type: string
+    default: "tests/web-testing"
+
+  - name: API_DIR
+    type: string
+    default: "tests/api-testing"
+
+stages:
+  - stage: Run_Tests
+    displayName: "Run ${{ parameters.TEST_TYPE }} Tests"
+    dependsOn:
+      - Dry_Run
+      - Build_Dependencies
+    condition: |
+      and(
+        not(failed()),
+        eq(variables['Build.SourceBranch'], 'refs/heads/main')
+      )
+    jobs:
+      - job: Run_Tests
+        displayName: "Run ${{ parameters.TEST_TYPE }} Tests"
+        timeoutInMinutes: 30
+        pool:
+          vmImage: "ubuntu-latest"
+        variables:
+          ${{ if eq(parameters.TEST_TYPE, 'web') }}:
+            workDir: ${{ parameters.WEB_DIR }}
+          ${{ else }}:
+            workDir: ${{ parameters.API_DIR }}
+          isWeb: ${{ eq(parameters.TEST_TYPE, 'web') }}
+        steps:
+          # ── Install dependencies ──
+          - script: |
+              cd $(workDir)
+              npm ci --prefer-offline
+            displayName: "Install dependencies"
+            retryCountOnTaskFailure: 2
+
+          - script: |
+              cd $(workDir)
+              ./node_modules/.bin/playwright install chromium
+            displayName: "Install Playwright browsers"
+            condition: eq(variables['isWeb'], 'True')
+
+          # ── Generate .env ──
+          - script: |
+              ENV_UPPER=$(echo "$TEST_ENV_PARAM" | tr '[:lower:]' '[:upper:]')
+              ENV_LOWER=$(echo "$TEST_ENV_PARAM" | tr '[:upper:]' '[:lower:]')
+
+              if [ "${{ parameters.TEST_TYPE }}" = "web" ]; then
+                ENV_FILE="${{ parameters.WEB_DIR }}/.env$([ "$ENV_LOWER" != "sit" ] && echo ".$ENV_LOWER")"
+              else
+                ENV_FILE="${{ parameters.API_DIR }}/.env.$ENV_LOWER"
+              fi
+
+              if [ "${{ parameters.TEST_TYPE }}" = "api" ]; then
+              cat > "$ENV_FILE" <<EOF
+              ENV=${ENV_UPPER}
+              BASE_URL=${BASE_URL}
+              AUTH_API_URL=${AUTH_API_URL}
+              ORG_CODE=${ORG_CODE}
+              DEFAULT_SITE_ID=${DEFAULT_SITE_ID}
+              DEFAULT_CONNECTION_ID=${DEFAULT_CONNECTION_ID}
+              USERNAME=${API_USERNAME}
+              PASSWORD=${API_PASSWORD}
+              USERNAME_IVR=${USERNAME_IVR}
+              PASSWORD_IVR=${PASSWORD_IVR}
+              DB_HOST=${DB_HOST}
+              DB_PORT=${DB_PORT}
+              DB_SERVICE_NAME=${DB_SERVICE_NAME}
+              DB_USER=${DB_USER}
+              DB_PASSWORD=${DB_PASSWORD}
+              EOF
+              else
+              cat > "$ENV_FILE" <<EOF
+              ENV=${ENV_UPPER}
+              BASE_URL=${BASE_URL}
+              USERNAME=${WEB_USERNAME}
+              PASSWORD=${WEB_PASSWORD}
+              DB_HOST=${DB_HOST}
+              DB_PORT=${DB_PORT}
+              DB_SERVICE_NAME=${DB_SERVICE_NAME}
+              DB_USER=${DB_USER}
+              DB_PASSWORD=${DB_PASSWORD}
+              EOF
+              fi
+
+              # Remove leading whitespace from heredoc
+              sed -i 's/^[[:space:]]*//' "$ENV_FILE"
+              echo "Generated: $ENV_FILE"
+            displayName: "Generate .env"
+            name: generateEnv
+            env:
+              TEST_ENV_PARAM: ${{ parameters.TEST_ENV }}
+              BASE_URL: $(BASE_URL)
+              AUTH_API_URL: $(AUTH_API_URL)
+              ORG_CODE: $(ORG_CODE)
+              DEFAULT_SITE_ID: $(DEFAULT_SITE_ID)
+              DEFAULT_CONNECTION_ID: $(DEFAULT_CONNECTION_ID)
+              API_USERNAME: $(API_USERNAME)
+              API_PASSWORD: $(API_PASSWORD)
+              USERNAME_IVR: $(USERNAME_IVR)
+              PASSWORD_IVR: $(PASSWORD_IVR)
+              WEB_USERNAME: $(WEB_USERNAME)
+              WEB_PASSWORD: $(WEB_PASSWORD)
+              DB_HOST: $(DB_HOST)
+              DB_PORT: $(DB_PORT)
+              DB_SERVICE_NAME: $(DB_SERVICE_NAME)
+              DB_USER: $(DB_USER)
+              DB_PASSWORD: $(DB_PASSWORD)
+
+          # ── Execute tests ──
+          - script: |
+              TEST_TYPE="${{ parameters.TEST_TYPE }}"
+              ENV_LOWER=$(echo "$TEST_ENV_PARAM" | tr '[:upper:]' '[:lower:]')
+              TEST_PATH_PARAM="${{ parameters.TEST_PATH }}"
+              CONFIG_FILE="$(workDir)/playwright.config.ts"
+              REPORT_DIR="$(workDir)/playwright-report"
+
+              # Set output variables
+              echo "##vso[task.setvariable variable=ENV;isOutput=true]$ENV_LOWER"
+              echo "##vso[task.setvariable variable=TEST_TYPE;isOutput=true]$TEST_TYPE"
+              echo "##vso[task.setvariable variable=REPORT_DIR;isOutput=true]$REPORT_DIR"
+
+              # Build command (use local playwright to avoid version conflicts)
+              CMD="ENV=$ENV_LOWER $(workDir)/node_modules/.bin/playwright test --config=$CONFIG_FILE"
+              [ "$PARALLEL" != "true" ] && CMD="$CMD --workers=1"
+              [ "$TEST_PATH_PARAM" != " " ] && [ -n "$TEST_PATH_PARAM" ] && CMD="$CMD $TEST_PATH_PARAM"
+
+              TEST_TAG="${{ parameters.TEST_TAG }}"
+              [ "$TEST_TAG" != " " ] && [ -n "$TEST_TAG" ] && CMD="$CMD --grep '$TEST_TAG'"
+              [ "$TEST_TYPE" = "api" ] && CMD="$CMD --grep-invert '@database|@heavy'"
+
+              EXTRA_ENV="${{ parameters.EXTRA_ENV }}"
+              [ "$EXTRA_ENV" != " " ] && [ -n "$EXTRA_ENV" ] && export $EXTRA_ENV
+
+              echo "Command: $CMD"
+              eval $CMD
+              TEST_EXIT=$?
+
+              # Parse results
+              RESULTS_FILE=$(find . -name "results.json" -path "*/test-results/*" 2>/dev/null | head -1)
+              if [ -n "$RESULTS_FILE" ]; then
+                parse() { node -e "$1" 2>/dev/null || echo "?"; }
+                PASSED=$(parse "const r=require('./$RESULTS_FILE');let c=0;(function w(ss){ss.forEach(s=>{(s.specs||[]).forEach(sp=>{(sp.tests||[]).forEach(t=>{if(['passed','expected'].includes(t.results?.[0]?.status))c++})});w(s.suites||[])})})(r.suites||[]);console.log(c)")
+                FAILED=$(parse "const r=require('./$RESULTS_FILE');let c=0;(function w(ss){ss.forEach(s=>{(s.specs||[]).forEach(sp=>{(sp.tests||[]).forEach(t=>{if(['failed','unexpected','timedOut'].includes(t.results?.[0]?.status))c++})});w(s.suites||[])})})(r.suites||[]);console.log(c)")
+                SKIPPED=$(parse "const r=require('./$RESULTS_FILE');let c=0;(function w(ss){ss.forEach(s=>{(s.specs||[]).forEach(sp=>{(sp.tests||[]).forEach(t=>{if((t.results?.[0]?.status||t.status)==='skipped')c++})});w(s.suites||[])})})(r.suites||[]);console.log(c)")
+                FLAKY=$(parse "const r=require('./$RESULTS_FILE');let c=0;(function w(ss){ss.forEach(s=>{(s.specs||[]).forEach(sp=>{(sp.tests||[]).forEach(t=>{if(t.results&&t.results.length>1&&t.results.at(-1)?.status==='passed')c++})});w(s.suites||[])})})(r.suites||[]);console.log(c)")
+                DURATION=$(parse "const r=require('./$RESULTS_FILE');const d=r.stats?.duration||0;console.log(Math.floor(d/60000)+'m '+Math.floor((d%60000)/1000)+'s')")
+              else
+                PASSED="?"; FAILED="?"; SKIPPED="?"; FLAKY="0"; DURATION="?"
+              fi
+
+              DISPLAY_PATH="${TEST_PATH_PARAM:-All}"
+              [ "$DISPLAY_PATH" = " " ] && DISPLAY_PATH="All"
+
+              echo "##vso[task.setvariable variable=TEST_PATH;isOutput=true]$DISPLAY_PATH"
+              echo "##vso[task.setvariable variable=PASSED;isOutput=true]$PASSED"
+              echo "##vso[task.setvariable variable=FAILED;isOutput=true]$FAILED"
+              echo "##vso[task.setvariable variable=SKIPPED;isOutput=true]$SKIPPED"
+              echo "##vso[task.setvariable variable=FLAKY;isOutput=true]$FLAKY"
+              echo "##vso[task.setvariable variable=DURATION;isOutput=true]$DURATION"
+
+              exit $TEST_EXIT
+            displayName: "Run ${{ parameters.TEST_TYPE }} Tests"
+            name: runTests
+            env:
+              TEST_ENV_PARAM: ${{ parameters.TEST_ENV }}
+              DBUS_SESSION_BUS_ADDRESS: /dev/null
+              DBUS_SYSTEM_BUS_ADDRESS: /dev/null
+
+          # ── Publish results ──
+          - task: PublishTestResults@2
+            displayName: "Publish test results"
+            condition: succeededOrFailed()
+            inputs:
+              testResultsFormat: "JUnit"
+              testResultsFiles: "**/test-results/junit.xml"
+              testRunTitle: "${{ parameters.TEST_TYPE }} Tests"
+
+          - script: |
+              REPORT_DIR="$(runTests.REPORT_DIR)"
+              if [ -d "$REPORT_DIR" ]; then
+                echo "##vso[task.setvariable variable=REPORT_EXISTS]true"
+                echo "##vso[task.setvariable variable=REPORT_PATH]$REPORT_DIR"
+              else
+                echo "##vso[task.setvariable variable=REPORT_EXISTS]false"
+              fi
+            displayName: "Check report exists"
+            condition: succeededOrFailed()
+
+          - task: PublishPipelineArtifact@1
+            displayName: "Publish HTML report"
+            condition: and(succeededOrFailed(), eq(variables['REPORT_EXISTS'], 'true'))
+            inputs:
+              targetPath: "$(REPORT_PATH)"
+              artifact: "${{ parameters.TEST_TYPE }}-report"
+              publishLocation: "pipeline"
