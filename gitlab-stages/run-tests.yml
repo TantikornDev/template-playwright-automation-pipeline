@@ -59,10 +59,9 @@
         - tests/web-testing/node_modules/
         - tests/api-testing/node_modules/
       policy: pull
-    - key: "playwright-browsers-$CI_COMMIT_REF_SLUG"
-      paths:
-        - $HOME/.cache/ms-playwright/
-      policy: pull
+  # Note: Playwright browsers are pre-installed in the docker image
+  # (mcr.microsoft.com/playwright:v1.44.0-jammy → /ms-playwright/)
+  # No need to restore $HOME/.cache/ms-playwright/ from cache.
   before_script:
     - |
       # Download shared scripts from template repo
