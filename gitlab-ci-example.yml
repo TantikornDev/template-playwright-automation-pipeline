@@ -11,10 +11,10 @@
 # Pin to a version tag for stability (recommended)
 # or use "main" for the latest
 include:
-  - remote: "https://raw.githubusercontent.com/TantikornDev/template-playwright-automation-pipeline/main/gitlab-stages/dry-run.yml"
-  - remote: "https://raw.githubusercontent.com/TantikornDev/template-playwright-automation-pipeline/main/gitlab-stages/build-dependencies.yml"
-  - remote: "https://raw.githubusercontent.com/TantikornDev/template-playwright-automation-pipeline/main/gitlab-stages/run-tests.yml"
-  - remote: "https://raw.githubusercontent.com/TantikornDev/template-playwright-automation-pipeline/main/gitlab-stages/notify.yml"
+  - remote: "https://raw.githubusercontent.com/TantikornDev/template-playwright-automation-pipeline/refs/heads/main/gitlab-stages/dry-run.yml"
+  - remote: "https://raw.githubusercontent.com/TantikornDev/template-playwright-automation-pipeline/refs/heads/main/gitlab-stages/build-dependencies.yml"
+  - remote: "https://raw.githubusercontent.com/TantikornDev/template-playwright-automation-pipeline/refs/heads/main/gitlab-stages/run-tests.yml"
+  - remote: "https://raw.githubusercontent.com/TantikornDev/template-playwright-automation-pipeline/refs/heads/main/gitlab-stages/notify.yml"
 
 # ── Stage order ───────────────────────────────────────────────
 stages:

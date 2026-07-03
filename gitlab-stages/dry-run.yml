@@ -26,7 +26,7 @@
   variables:
     WEB_DIR: "tests/web-testing"
     API_DIR: "tests/api-testing"
-    TEMPLATES_REF: "main"
+    TEMPLATES_REF: "refs/heads/main"
   before_script:
     - |
       # Download shared scripts from template repo

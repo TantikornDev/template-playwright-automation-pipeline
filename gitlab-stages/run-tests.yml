@@ -45,7 +45,7 @@
     TEST_TAG: " "
     EXTRA_ENV: " "
     PARALLEL: "false"
-    TEMPLATES_REF: "main"
+    TEMPLATES_REF: "refs/heads/main"
     # Disable dbus warnings for headless Playwright
     DBUS_SESSION_BUS_ADDRESS: /dev/null
     DBUS_SYSTEM_BUS_ADDRESS: /dev/null

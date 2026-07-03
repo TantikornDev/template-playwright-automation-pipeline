@@ -30,7 +30,7 @@
   image: alpine:3.19
   when: always    # run even when run_tests fails
   variables:
-    TEMPLATES_REF: "main"
+    TEMPLATES_REF: "refs/heads/main"
   dependencies:
     - run_tests   # pull test-results.env artifact; change if your job is named differently
   before_script:
