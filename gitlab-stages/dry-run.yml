@@ -1,0 +1,48 @@
+# ─────────────────────────────────────────────────────────────
+# GitLab CI Template: Dry Run - Validate project files
+# Stage:  validate
+# Runs:   non-main branches only
+#
+# Usage in consumer .gitlab-ci.yml:
+#   include:
+#     - remote: https://raw.githubusercontent.com/TantikornDev/template-playwright-automation-pipeline/main/gitlab-stages/dry-run.yml
+#
+#   dry_run:
+#     extends: .dry_run
+#     variables:
+#       TEST_TYPE: "web"
+#       WEB_DIR: "tests/web-testing"
+#
+# Variables (override as needed):
+#   TEST_TYPE       : 'web' | 'api'               (required)
+#   WEB_DIR         : path to web tests            (default: tests/web-testing)
+#   API_DIR         : path to api tests            (default: tests/api-testing)
+#   TEMPLATES_REF   : git ref for template scripts (default: main)
+# ─────────────────────────────────────────────────────────────
+
+.dry_run:
+  stage: validate
+  image: mcr.microsoft.com/playwright:v1.44.0-jammy
+  variables:
+    WEB_DIR: "tests/web-testing"
+    API_DIR: "tests/api-testing"
+    TEMPLATES_REF: "main"
+  before_script:
+    - |
+      # Download shared scripts from template repo
+      SCRIPTS_BASE="https://raw.githubusercontent.com/TantikornDev/template-playwright-automation-pipeline/${TEMPLATES_REF}/scripts"
+      mkdir -p .ci-scripts
+      curl -sf "$SCRIPTS_BASE/validate-project.sh" -o .ci-scripts/validate-project.sh
+      chmod +x .ci-scripts/validate-project.sh
+  script:
+    - |
+      # Resolve WORK_DIR based on TEST_TYPE
+      if [ "$TEST_TYPE" = "web" ]; then
+        export WORK_DIR="$WEB_DIR"
+      else
+        export WORK_DIR="$API_DIR"
+      fi
+      bash .ci-scripts/validate-project.sh
+  rules:
+    - if: $CI_COMMIT_BRANCH != "main" && $CI_PIPELINE_SOURCE != "schedule"
+  allow_failure: false

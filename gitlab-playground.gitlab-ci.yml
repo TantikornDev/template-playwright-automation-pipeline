@@ -1,0 +1,95 @@
+# ─────────────────────────────────────────────────────────────
+# .gitlab-ci.yml  (for GitLab Playground repo)
+#
+# Copy this file to your GitLab project as: .gitlab-ci.yml
+#
+# This is the CONSUMER file — it includes templates from the
+# central GitHub repo and defines the actual pipeline jobs.
+#
+# GitLab Project: namespace_id=126218410
+# Template repo:  https://github.com/TantikornDev/template-playwright-automation-pipeline
+# ─────────────────────────────────────────────────────────────
+
+include:
+  - remote: "https://raw.githubusercontent.com/TantikornDev/template-playwright-automation-pipeline/main/gitlab-stages/dry-run.yml"
+  - remote: "https://raw.githubusercontent.com/TantikornDev/template-playwright-automation-pipeline/main/gitlab-stages/build-dependencies.yml"
+  - remote: "https://raw.githubusercontent.com/TantikornDev/template-playwright-automation-pipeline/main/gitlab-stages/run-tests.yml"
+  - remote: "https://raw.githubusercontent.com/TantikornDev/template-playwright-automation-pipeline/main/gitlab-stages/notify.yml"
+
+stages:
+  - validate
+  - build
+  - test
+  - notify
+
+# ── Default env (override per schedule or manual run) ─────────
+variables:
+  TEST_TYPE: "web"
+  TEST_ENV: "DEV"
+  WEB_DIR: "tests/web-testing"
+  API_DIR: "tests/api-testing"
+  TEMPLATES_REF: "main"
+
+# ── Pipeline triggers ─────────────────────────────────────────
+workflow:
+  rules:
+    - if: $CI_PIPELINE_SOURCE == "push"
+    - if: $CI_PIPELINE_SOURCE == "merge_request_event"
+    - if: $CI_PIPELINE_SOURCE == "schedule"
+    - if: $CI_PIPELINE_SOURCE == "web"
+
+# ── Jobs ──────────────────────────────────────────────────────
+
+dry_run:
+  extends: .dry_run
+
+build_dependencies:
+  extends: .build_dependencies
+
+run_tests:
+  extends: .run_tests
+  # Variables TEST_ENV, TEST_PATH, TEST_TAG, EXTRA_ENV can be
+  # set at pipeline trigger time (web UI "Run Pipeline" → Add variable)
+
+notify:
+  extends: .notify_teams
+  dependencies:
+    - run_tests
+  variables:
+    TEAMS_WEBHOOK_URL: $TEAMS_WEBHOOK_URL
+
+# ─────────────────────────────────────────────────────────────
+# Required CI/CD Variables (GitLab: Settings → CI/CD → Variables)
+# Mark all as Masked + Protected where applicable.
+#
+# ── Notification ──────────────────────────────────────────────
+#   TEAMS_WEBHOOK_URL          (masked)
+#
+# ── Common ───────────────────────────────────────────────────
+#   BASE_URL                   (masked)
+#   AUTH_API_URL               (masked)
+#   ORG_CODE
+#
+# ── API Tests ────────────────────────────────────────────────
+#   DEFAULT_SITE_ID
+#   DEFAULT_CONNECTION_ID
+#   API_USERNAME               (masked)
+#   API_PASSWORD               (masked)
+#   USERNAME_IVR               (masked)
+#   PASSWORD_IVR               (masked)
+#
+# ── Web Tests ────────────────────────────────────────────────
+#   WEB_USERNAME               (masked)
+#   WEB_PASSWORD               (masked)
+#
+# ── Database ─────────────────────────────────────────────────
+#   DB_HOST
+#   DB_PORT
+#   DB_SERVICE_NAME
+#   DB_USER                    (masked)
+#   DB_PASSWORD                (masked)
+#
+# ── Schedules (Settings → CI/CD → Schedules) ─────────────────
+#   Cron: "0 3 * * 1-5"   (Mon–Fri 10:00 ICT)
+#   Variables: TEST_ENV=DEV  TEST_TYPE=web
+# ─────────────────────────────────────────────────────────────

@@ -1,0 +1,109 @@
+# ─────────────────────────────────────────────────────────────
+# GitLab CI Template: Run Tests - Execute Playwright & publish results
+# Stage:  test
+# Runs:   main branch + scheduled runs (after build_dependencies)
+#
+# Usage in consumer .gitlab-ci.yml:
+#   include:
+#     - remote: https://raw.githubusercontent.com/TantikornDev/template-playwright-automation-pipeline/main/gitlab-stages/run-tests.yml
+#
+#   run_tests:
+#     extends: .run_tests
+#     variables:
+#       TEST_TYPE: "web"
+#       TEST_ENV: "DEV"
+#
+# Variables (override as needed):
+#   TEST_TYPE       : 'web' | 'api'               (required)
+#   TEST_ENV        : 'DEV' | 'SIT' | 'UAT'       (required)
+#   WEB_DIR         : path to web tests            (default: tests/web-testing)
+#   API_DIR         : path to api tests            (default: tests/api-testing)
+#   TEST_PATH       : specific test file/folder    (optional)
+#   TEST_TAG        : grep tag e.g. @smoke         (optional)
+#   EXTRA_ENV       : KEY=VALUE overrides          (optional)
+#   PARALLEL        : 'true' to run in parallel    (default: single worker)
+#   TEMPLATES_REF   : git ref for template scripts (default: main)
+#
+# Secret CI Variables (set in GitLab → Settings → CI/CD → Variables):
+#   BASE_URL, AUTH_API_URL, ORG_CODE
+#   DEFAULT_SITE_ID, DEFAULT_CONNECTION_ID
+#   API_USERNAME, API_PASSWORD, USERNAME_IVR, PASSWORD_IVR
+#   WEB_USERNAME, WEB_PASSWORD
+#   DB_HOST, DB_PORT, DB_SERVICE_NAME, DB_USER, DB_PASSWORD
+#
+# Outputs (via test-results.env dotenv artifact):
+#   ENV, TEST_TYPE, TEST_PATH, PASSED, FAILED, SKIPPED, FLAKY, DURATION
+# ─────────────────────────────────────────────────────────────
+
+.run_tests:
+  stage: test
+  image: mcr.microsoft.com/playwright:v1.44.0-jammy
+  variables:
+    WEB_DIR: "tests/web-testing"
+    API_DIR: "tests/api-testing"
+    TEST_PATH: " "
+    TEST_TAG: " "
+    EXTRA_ENV: " "
+    PARALLEL: "false"
+    TEMPLATES_REF: "main"
+    # Disable dbus warnings for headless Playwright
+    DBUS_SESSION_BUS_ADDRESS: /dev/null
+    DBUS_SYSTEM_BUS_ADDRESS: /dev/null
+  cache:
+    - key:
+        prefix: "node-modules-$TEST_TYPE"
+        files:
+          - tests/web-testing/package-lock.json
+          - tests/api-testing/package-lock.json
+      paths:
+        - tests/web-testing/node_modules/
+        - tests/api-testing/node_modules/
+      policy: pull
+    - key: "playwright-browsers-$CI_COMMIT_REF_SLUG"
+      paths:
+        - $HOME/.cache/ms-playwright/
+      policy: pull
+  before_script:
+    - |
+      # Download shared scripts from template repo
+      SCRIPTS_BASE="https://raw.githubusercontent.com/TantikornDev/template-playwright-automation-pipeline/${TEMPLATES_REF}/scripts"
+      mkdir -p .ci-scripts
+      for SCRIPT in generate-env.sh run-tests.sh; do
+        curl -sf "$SCRIPTS_BASE/$SCRIPT" -o ".ci-scripts/$SCRIPT"
+        chmod +x ".ci-scripts/$SCRIPT"
+      done
+  script:
+    - |
+      if [ "$TEST_TYPE" = "web" ]; then
+        export WORK_DIR="$WEB_DIR"
+      else
+        export WORK_DIR="$API_DIR"
+      fi
+
+      # Generate .env file
+      bash .ci-scripts/generate-env.sh
+
+      # Run tests (writes test-results.env)
+      bash .ci-scripts/run-tests.sh
+  after_script:
+    - |
+      # Ensure test-results.env exists even if run-tests.sh failed early
+      if [ ! -f test-results.env ]; then
+        printf 'ENV=unknown\nTEST_TYPE=%s\nTEST_PATH=All\nPASSED=?\nFAILED=?\nSKIPPED=?\nFLAKY=0\nDURATION=?\n' "$TEST_TYPE" > test-results.env
+      fi
+  artifacts:
+    when: always           # upload artifacts even when tests fail
+    expire_in: 7 days
+    reports:
+      dotenv: test-results.env    # exports PASSED, FAILED, etc. to downstream jobs
+      junit:
+        - "*/test-results/junit.xml"
+        - "**/test-results/junit.xml"
+    paths:
+      - "*/playwright-report/"
+      - "**/playwright-report/"
+      - test-results.env
+  timeout: 30 minutes
+  rules:
+    - if: $CI_COMMIT_BRANCH == "main"
+    - if: $CI_PIPELINE_SOURCE == "schedule"

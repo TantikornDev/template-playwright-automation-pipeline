@@ -1,0 +1,81 @@
+# ─────────────────────────────────────────────────────────────
+# GitLab CI Template: Notify - Send results to Microsoft Teams
+# Stage:  notify
+# Runs:   always (even when tests fail)
+#
+# Usage in consumer .gitlab-ci.yml:
+#   include:
+#     - remote: https://raw.githubusercontent.com/TantikornDev/template-playwright-automation-pipeline/main/gitlab-stages/notify.yml
+#
+#   notify:
+#     extends: .notify_teams
+#     dependencies: [run_tests]   # matches your run_tests job name
+#     variables:
+#       TEAMS_WEBHOOK_URL: $TEAMS_WEBHOOK_URL   # from CI/CD secret variable
+#
+# Variables:
+#   TEAMS_WEBHOOK_URL   : Teams webhook URL (from CI secret)       (required)
+#   TEMPLATES_REF       : git ref for template scripts             (default: main)
+#
+# Auto-resolved from test-results.env artifact (dotenv):
+#   PASSED, FAILED, SKIPPED, FLAKY, DURATION, ENV, TEST_TYPE, TEST_PATH
+#
+# Auto-resolved from GitLab predefined variables:
+#   $CI_PIPELINE_URL, $CI_COMMIT_BRANCH, $GITLAB_USER_NAME,
+#   $CI_PIPELINE_ID, $CI_PROJECT_NAME
+# ─────────────────────────────────────────────────────────────
+
+.notify_teams:
+  stage: notify
+  image: alpine:3.19
+  when: always    # run even when run_tests fails
+  variables:
+    TEMPLATES_REF: "main"
+  dependencies:
+    - run_tests   # pull test-results.env artifact; change if your job is named differently
+  before_script:
+    - apk add --no-cache curl
+    - |
+      # Download notify-teams.sh from template repo
+      SCRIPTS_BASE="https://raw.githubusercontent.com/TantikornDev/template-playwright-automation-pipeline/${TEMPLATES_REF}/scripts"
+      mkdir -p .ci-scripts
+      curl -sf "$SCRIPTS_BASE/notify-teams.sh" -o .ci-scripts/notify-teams.sh
+      chmod +x .ci-scripts/notify-teams.sh
+  script:
+    - |
+      # Determine overall status from test counts (from dotenv artifact)
+      if [ "${FAILED:-?}" != "?" ] && [ "${FAILED:-0}" != "0" ]; then
+        JOB_STATUS="Failed"
+      else
+        JOB_STATUS="Succeeded"
+      fi
+
+      # Map GitLab predefined variables to generic script vars
+      PIPELINE_URL="${CI_PIPELINE_URL:-#}"
+      BRANCH="${CI_COMMIT_BRANCH:-unknown}"
+      TRIGGERED_BY="${GITLAB_USER_NAME:-CI}"
+      BUILD_NUMBER="${CI_PIPELINE_ID:-?}"
+      PIPELINE_NAME="${CI_PROJECT_NAME:-QA Pipeline}"
+      REPORT_URL="${CI_PROJECT_URL:-#}/-/pipelines/${CI_PIPELINE_ID:-0}/artifacts"
+
+      # Run notify script (reads PASSED, FAILED, etc. from env / dotenv artifact)
+      WEBHOOK_URL="$TEAMS_WEBHOOK_URL" \
+      TEST_TYPE="${TEST_TYPE:-unknown}" \
+      TEST_PATH="${TEST_PATH:-All}" \
+      ENV_NAME="${ENV:-unknown}" \
+      PASSED="${PASSED:-?}" \
+      FAILED="${FAILED:-?}" \
+      SKIPPED="${SKIPPED:-?}" \
+      FLAKY="${FLAKY:-0}" \
+      DURATION="${DURATION:-?}" \
+      JOB_STATUS="$JOB_STATUS" \
+      PIPELINE_URL="$PIPELINE_URL" \
+      REPORT_URL="$REPORT_URL" \
+      BRANCH="$BRANCH" \
+      TRIGGERED_BY="$TRIGGERED_BY" \
+      BUILD_NUMBER="$BUILD_NUMBER" \
+      PIPELINE_NAME="$PIPELINE_NAME" \
+      bash .ci-scripts/notify-teams.sh
+  rules:
+    - if: $CI_COMMIT_BRANCH == "main"
+    - if: $CI_PIPELINE_SOURCE == "schedule"

@@ -1,0 +1,96 @@
+# ─────────────────────────────────────────────────────────────
+# gitlab-ci-example.yml
+# Example .gitlab-ci.yml for a Playwright test project
+# that uses templates from this central GitHub repo.
+#
+# Copy to your project as: .gitlab-ci.yml
+# Replace variable values with your project's specifics.
+# ─────────────────────────────────────────────────────────────
+
+# ── Pull templates from GitHub template repo ──────────────────
+# Pin to a version tag for stability (recommended)
+# or use "main" for the latest
+include:
+  - remote: "https://raw.githubusercontent.com/TantikornDev/template-playwright-automation-pipeline/main/gitlab-stages/dry-run.yml"
+  - remote: "https://raw.githubusercontent.com/TantikornDev/template-playwright-automation-pipeline/main/gitlab-stages/build-dependencies.yml"
+  - remote: "https://raw.githubusercontent.com/TantikornDev/template-playwright-automation-pipeline/main/gitlab-stages/run-tests.yml"
+  - remote: "https://raw.githubusercontent.com/TantikornDev/template-playwright-automation-pipeline/main/gitlab-stages/notify.yml"
+
+# ── Stage order ───────────────────────────────────────────────
+stages:
+  - validate     # dry_run
+  - build        # build_dependencies
+  - test         # run_tests
+  - notify       # notify
+
+# ── Shared variables ──────────────────────────────────────────
+variables:
+  TEST_TYPE: "web"           # 'web' | 'api'
+  WEB_DIR: "tests/web-testing"
+  API_DIR: "tests/api-testing"
+  TEMPLATES_REF: "main"      # change to tag e.g. "v1.0.0" for stability
+
+# ── Triggers ──────────────────────────────────────────────────
+workflow:
+  rules:
+    - if: $CI_PIPELINE_SOURCE == "push"
+      when: always
+    - if: $CI_PIPELINE_SOURCE == "merge_request_event"
+      when: always
+    - if: $CI_PIPELINE_SOURCE == "schedule"
+      when: always
+    - if: $CI_PIPELINE_SOURCE == "web"    # manual run
+      when: always
+
+# ── Schedule (equivalent to Azure DevOps cron) ───────────────
+# Configure in GitLab: Settings → CI/CD → Schedules
+# Cron: "0 3 * * 1-5"  (Mon–Fri 10:00 ICT / 03:00 UTC)
+
+# ── Jobs (extend hidden templates) ───────────────────────────
+
+dry_run:
+  extends: .dry_run
+  variables:
+    TEST_TYPE: $TEST_TYPE
+    WEB_DIR: $WEB_DIR
+    API_DIR: $API_DIR
+
+build_dependencies:
+  extends: .build_dependencies
+  variables:
+    TEST_TYPE: $TEST_TYPE
+    WEB_DIR: $WEB_DIR
+    API_DIR: $API_DIR
+
+run_tests:
+  extends: .run_tests
+  variables:
+    TEST_TYPE: $TEST_TYPE
+    TEST_ENV: $TEST_ENV       # set via manual run or schedule variable
+    WEB_DIR: $WEB_DIR
+    API_DIR: $API_DIR
+    # Optional overrides (set in manual pipeline run or schedule):
+    # TEST_PATH: "feature-1/"
+    # TEST_TAG: "@smoke"
+    # EXTRA_ENV: "PARALLEL=true"
+
+notify:
+  extends: .notify_teams
+  dependencies:
+    - run_tests               # must match the job name above
+  variables:
+    TEAMS_WEBHOOK_URL: $TEAMS_WEBHOOK_URL   # set as a masked CI/CD secret variable
+
+# ─────────────────────────────────────────────────────────────
+# Required CI/CD Variables (Settings → CI/CD → Variables):
+#
+#   Secret (masked):
+#     TEAMS_WEBHOOK_URL, BASE_URL, AUTH_API_URL, ORG_CODE,
+#     DEFAULT_SITE_ID, DEFAULT_CONNECTION_ID,
+#     API_USERNAME, API_PASSWORD, USERNAME_IVR, PASSWORD_IVR,
+#     WEB_USERNAME, WEB_PASSWORD,
+#     DB_HOST, DB_PORT, DB_SERVICE_NAME, DB_USER, DB_PASSWORD
+#
+#   Pipeline (not masked):
+#     TEST_ENV   : 'DEV' | 'SIT' | 'UAT'  (can set default in schedule)
+# ─────────────────────────────────────────────────────────────

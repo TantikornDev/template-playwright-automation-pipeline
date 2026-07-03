@@ -1,15 +1,31 @@
 # template-playwright-automation-pipeline
 
-Central Azure DevOps pipeline templates for Playwright automation projects.
+Central CI/CD pipeline templates for Playwright automation — supports both **Azure DevOps** and **GitLab CI**.
 
 ## Structure
 
 ```
-stages/
-├── dry-run.yml            # Validate files on non-main branches
-├── build-dependencies.yml # Install & cache node_modules + browsers (main only)
-├── run-tests.yml          # Execute tests & publish results
-└── notify.yml             # Send results to Microsoft Teams
+stages/                        # Azure DevOps stage templates
+├── dry-run.yml                # Validate files on non-main branches
+├── build-dependencies.yml     # Install & cache node_modules + browsers (main only)
+├── run-tests.yml              # Execute tests & publish results
+└── notify.yml                 # Send results to Microsoft Teams
+
+gitlab-stages/                 # GitLab CI job templates (include: remote:)
+├── dry-run.yml                # Hidden job .dry_run
+├── build-dependencies.yml     # Hidden job .build_dependencies
+├── run-tests.yml              # Hidden job .run_tests  (exports test-results.env)
+└── notify.yml                 # Hidden job .notify_teams
+
+scripts/                       # Shared shell scripts (used by GitLab CI at runtime)
+├── validate-project.sh        # File check, npm ci, tsc, playwright --list
+├── generate-env.sh            # Generate .env file from CI secret variables
+├── run-tests.sh               # Run playwright, parse results → test-results.env
+└── notify-teams.sh            # Send MessageCard to Teams webhook
+
+azure-pipelines-example.yml    # Full Azure DevOps consumer example
+gitlab-ci-example.yml          # Full GitLab CI consumer example
+gitlab-playground.gitlab-ci.yml  # Ready-to-use .gitlab-ci.yml for playground repo
 ```
 
 ## Usage
@@ -56,6 +72,60 @@ stages:
 ```
 
 See `azure-pipelines-example.yml` for a full working example.
+
+---
+
+## GitLab CI Usage
+
+### 1. Set CI/CD Secret Variables
+
+Go to **GitLab project → Settings → CI/CD → Variables** and add:
+
+```
+TEAMS_WEBHOOK_URL   (masked)
+BASE_URL, AUTH_API_URL, ORG_CODE
+API_USERNAME, API_PASSWORD, ...   (see gitlab-ci-example.yml for full list)
+```
+
+### 2. Copy `gitlab-ci-example.yml` to your project as `.gitlab-ci.yml`
+
+The file uses `include: remote:` to pull templates from this GitHub repo at pipeline runtime.
+
+```yaml
+include:
+  - remote: "https://raw.githubusercontent.com/TantikornDev/template-playwright-automation-pipeline/main/gitlab-stages/dry-run.yml"
+  - remote: "https://raw.githubusercontent.com/TantikornDev/template-playwright-automation-pipeline/main/gitlab-stages/build-dependencies.yml"
+  - remote: "https://raw.githubusercontent.com/TantikornDev/template-playwright-automation-pipeline/main/gitlab-stages/run-tests.yml"
+  - remote: "https://raw.githubusercontent.com/TantikornDev/template-playwright-automation-pipeline/main/gitlab-stages/notify.yml"
+
+stages: [validate, build, test, notify]
+
+run_tests:
+  extends: .run_tests
+  variables:
+    TEST_TYPE: "web"
+    TEST_ENV: "DEV"
+
+notify:
+  extends: .notify_teams
+  dependencies: [run_tests]
+  variables:
+    TEAMS_WEBHOOK_URL: $TEAMS_WEBHOOK_URL
+```
+
+### How variables flow between GitLab CI jobs
+
+```
+run_tests job
+  └── writes test-results.env  (PASSED, FAILED, SKIPPED, FLAKY, DURATION, ENV, ...)
+        └── artifacts.reports.dotenv → exports to downstream jobs
+
+notify job
+  └── dependencies: [run_tests]  ← downloads test-results.env artifact
+        └── reads PASSED, FAILED, etc. directly as env vars
+```
+
+---
 
 ## Template Parameters
 

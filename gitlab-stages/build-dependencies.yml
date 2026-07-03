@@ -1,0 +1,61 @@
+# ─────────────────────────────────────────────────────────────
+# GitLab CI Template: Build Dependencies - Install & cache
+# Stage:  build
+# Runs:   main branch + scheduled runs only
+#
+# Usage in consumer .gitlab-ci.yml:
+#   include:
+#     - remote: https://raw.githubusercontent.com/TantikornDev/template-playwright-automation-pipeline/main/gitlab-stages/build-dependencies.yml
+#
+#   build_dependencies:
+#     extends: .build_dependencies
+#     variables:
+#       TEST_TYPE: "web"
+#       WEB_DIR: "tests/web-testing"
+#
+# Variables (override as needed):
+#   TEST_TYPE  : 'web' | 'api'               (required)
+#   WEB_DIR    : path to web tests            (default: tests/web-testing)
+#   API_DIR    : path to api tests            (default: tests/api-testing)
+# ─────────────────────────────────────────────────────────────
+
+.build_dependencies:
+  stage: build
+  image: mcr.microsoft.com/playwright:v1.44.0-jammy
+  variables:
+    WEB_DIR: "tests/web-testing"
+    API_DIR: "tests/api-testing"
+  script:
+    - |
+      if [ "$TEST_TYPE" = "web" ]; then
+        WORK_DIR="$WEB_DIR"
+      else
+        WORK_DIR="$API_DIR"
+      fi
+
+      echo "── Build Dependencies: $TEST_TYPE ($WORK_DIR) ──"
+      cd "$WORK_DIR"
+      npm ci --prefer-offline
+
+      if [ "$TEST_TYPE" = "web" ]; then
+        echo "Installing Playwright browsers..."
+        npx playwright install chromium --with-deps
+      fi
+  cache:
+    - key:
+        prefix: "node-modules-$TEST_TYPE"
+        files:
+          - tests/web-testing/package-lock.json
+          - tests/api-testing/package-lock.json
+      paths:
+        - tests/web-testing/node_modules/
+        - tests/api-testing/node_modules/
+      policy: push
+    - key: "playwright-browsers-$CI_COMMIT_REF_SLUG"
+      paths:
+        - $HOME/.cache/ms-playwright/
+      policy: push
+      when: on_success
+  rules:
+    - if: $CI_COMMIT_BRANCH == "main"
+    - if: $CI_PIPELINE_SOURCE == "schedule"
